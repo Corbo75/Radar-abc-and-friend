@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Radar Tactique</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: #080c08;
+            color: #a0ffa0;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 15px;
+        }
+
+        .radar-container {
+            position: relative;
+            width: 280px;
+            height: 280px;
+            border-radius: 50%;
+            background-color: #000800;
+            border: 2px solid #00ff66;
+            box-shadow: 0 0 15px rgba(0, 255, 102, 0.2);
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+
+        .circle {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            border: 1px dashed #004411;
+            border-radius: 50%;
+            pointer-events: none;
+        }
+
+        .c-100 { width: 33%; height: 33%; border-color: rgba(255, 204, 0, 0.4); }
+        .c-250 { width: 66%; height: 66%; }
+        .c-500 { width: 100%; height: 100%; }
+
+        .axis-v {
+            position: absolute;
+            top: 0; bottom: 0; left: 50%;
+            width: 1px; background-color: #004411;
+        }
+
+        .axis-h {
+            position: absolute;
+            left: 0; right: 0; top: 50%;
+            height: 1px; background-color: #004411;
+        }
+
+        .sweep {
+            position: absolute;
+            top: 0; right: 0; width: 50%; height: 50%;
+            transform-origin: 0% 100%;
+            background: linear-gradient(135deg, rgba(0, 255, 102, 0.3) 0%, transparent 70%);
+            animation: sweepAnim 3s linear infinite;
+        }
+
+        @keyframes sweepAnim {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .panel {
+            width: 100%;
+            max-width: 300px;
+            background: #0f170f;
+            border: 1px solid #004411;
+            border-radius: 8px;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            text-align: center;
+        }
+
+        .info-title {
+            color: #00ff66;
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
+
+        .info-sub {
+            color: #7a9a7a;
+            font-size: 0.85rem;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            flex: 1;
+            background: #102010;
+            border: 1px solid #00ff66;
+            color: #00ff66;
+            padding: 10px;
+            font-family: inherit;
+            font-size: 0.85rem;
+            font-weight: bold;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        button:active {
+            background: #00ff66;
+            color: #000;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="radar-container">
+        <div class="circle c-100"></div>
+        <div class="circle c-250"></div>
+        <div class="circle c-500"></div>
+        <div class="axis-v"></div>
+        <div class="axis-h"></div>
+        <div class="sweep"></div>
+    </div>
+
+    <div class="panel">
+        <div id="target-name" class="info-title">Point A (Éloigné) : 250 m</div>
+        <div id="target-mode" class="info-sub">Mode: Sonar Écho (1s/250m)</div>
+
+        <div class="controls">
+            <button id="btn-audio" onclick="toggleAudio()">🔊 Audio: OFF</button>
+            <button id="btn-next" onclick="nextTarget()">🎯 Changer Cible</button>
+        </div>
+    </div>
+
+    <script>
+        let ac = null;
+        let audioActive = false;
+        let lastPing = 0;
+
+        const targets = [
+            { name: "Point A (Éloigné)", dist: 250, angle: 0, mode: "Sonar Écho (1s/250m)" },
+            { name: "Point B (Lointain)", dist: 500, angle: 45, mode: "Sonar Écho (1s/250m)" },
+            { name: "Point C (Proche Gauche)", dist: 45, angle: -60, mode: "Cue Tone Proximité" },
+            { name: "Coéquipier (Proche Droite)", dist: 30, angle: 60, mode: "Cue Tone Proximité" },
+            { name: "Danger (Derrière)", dist: 15, angle: 180, mode: "Cue Tone Proximité" }
+        ];
+
+        let index = 0;
+
+        function initAudio() {
+            if (!ac) {
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                if (AudioCtx) ac = new AudioCtx();
+            }
+        }
+
+        function toggleAudio() {
+            initAudio();
+            audioActive = !audioActive;
+            const btn = document.getElementById('btn-audio');
+            if (btn) btn.innerText = audioActive ? "🔊 Audio: ON" : "🔊 Audio: OFF";
+            if (audioActive && ac && ac.state === 'suspended') {
+                ac.resume();
+            }
+        }
+
+        function playPing(vol, freq, duration) {
+            if (!ac || !audioActive || ac.state !== 'running') return;
+            try {
+                const safeFreq = Math.max(100, freq);
+                const t = ac.currentTime;
+                const o = ac.createOscillator();
+                const g = ac.createGain();
+                o.type = 'sine';
+                o.frequency.setValueAtTime(safeFreq, t);
+                g.gain.setValueAtTime(0.0001, t);
+                g.gain.linearRampToValueAtTime(vol, t + 0.01);
+                g.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+                o.connect(g);
+                g.connect(ac.destination);
+                o.start(t);
+                o.stop(t + duration);
+            } catch(e) {}
+        }
+
+        function playCueTone(angle, dist) {
+            if (!ac || !audioActive || ac.state !== 'running') return;
+            try {
+                const t = ac.currentTime;
+                const o = ac.createOscillator();
+                const g = ac.createGain();
+                o.type = 'sine';
+
+                const rad = angle * Math.PI / 180;
+                const baseFreq = 600 + (Math.cos(rad) * 250);
+                const delta = Math.sin(rad) * 300;
+
+                const startFreq = Math.max(100, baseFreq - delta);
+                const endFreq = Math.max(100, baseFreq + delta);
+
+                o.frequency.setValueAtTime(startFreq, t);
+                o.frequency.exponentialRampToValueAtTime(endFreq, t + 0.15);
+
+                const vol = Math.min(0.4, Math.max(0.05, 0.1 + (1 - dist / 100) * 0.3));
+                g.gain.setValueAtTime(0.0001, t);
+                g.gain.linearRampToValueAtTime(vol, t + 0.01);
+                g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+
+                o.connect(g);
+                g.connect(ac.destination);
+                o.start(t);
+                o.stop(t + 0.15);
+            } catch(e) {}
+        }
+
+        function updateAudio() {
+            if (!audioActive || !ac) return;
+            const now = performance.now();
+            const curr = targets[index];
+
+            if (curr.dist >= 100) {
+                if (now - lastPing < 3000) return;
+                lastPing = now;
+                playPing(0.3, 1800, 0.05);
+                const delay = (curr.dist / 250) * 1000;
+                setTimeout(() => playPing(0.2, 1000, 0.12), delay);
+            } else {
+                const interval = Math.max(200, curr.dist * 10);
+                if (now - lastPing < interval) return;
+                lastPing = now;
+                playCueTone(curr.angle, curr.dist);
+            }
+        }
+
+        function nextTarget() {
+            index = (index + 1) % targets.length;
+            const curr = targets[index];
+            const titleEl = document.getElementById('target-name');
+            const modeEl = document.getElementById('target-mode');
+            if (titleEl) titleEl.innerText = `${curr.name} : ${curr.dist} m`;
+            if (modeEl) modeEl.innerText = `Mode: ${curr.mode}`;
+        }
+
+        setInterval(updateAudio, 100);
+    </script>
+</body>
+</html>
